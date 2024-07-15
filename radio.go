@@ -7,12 +7,10 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/faiface/beep"
-	"github.com/faiface/beep/effects"
 	"github.com/faiface/beep/flac"
 	"github.com/faiface/beep/mp3"
 	"github.com/faiface/beep/speaker"
@@ -102,12 +100,6 @@ func updateStationsPeriodically(interval time.Duration, stations *[]Station) {
 	}
 }
 
-var volume = &effects.Volume{
-	Base:   2,
-	Volume: 0,
-	Silent: false,
-}
-
 func playStream(url string, control chan string, wg *sync.WaitGroup) error {
 	defer wg.Done()
 
@@ -124,8 +116,7 @@ func playStream(url string, control chan string, wg *sync.WaitGroup) error {
 
 	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
 
-	volume.Streamer = streamer
-	speaker.Play(volume)
+	speaker.Play(streamer)
 
 	done := make(chan bool)
 	go func() {
@@ -137,25 +128,9 @@ func playStream(url string, control chan string, wg *sync.WaitGroup) error {
 		select {
 		case cmd := <-control:
 			switch cmd {
-			case "pause":
-				speaker.Lock()
-				volume.Silent = true
-				speaker.Unlock()
-			case "resume":
-				speaker.Lock()
-				volume.Silent = false
-				speaker.Unlock()
 			case "stop":
 				done <- true
 				return nil
-			case "volume_up":
-				speaker.Lock()
-				volume.Volume += 0.1
-				speaker.Unlock()
-			case "volume_down":
-				speaker.Lock()
-				volume.Volume -= 0.1
-				speaker.Unlock()
 			}
 		}
 	}
@@ -191,13 +166,6 @@ func decodeAudio(r io.Reader) (beep.StreamSeekCloser, beep.Format, error) {
 	return nil, beep.Format{}, fmt.Errorf("неподдерживаемый формат")
 }
 
-func updateEqualizer(equalizer *tview.TextView, volumeLevel float64, stationName string) {
-	barCount := 10
-	fullBars := int(volumeLevel * float64(barCount))
-	bars := strings.Repeat("[green]█", fullBars) + strings.Repeat("[grey]█", barCount-fullBars)
-	equalizer.SetText(fmt.Sprintf("Громкость: %.1f\nСтанция: %s\n%s", volumeLevel, stationName, bars))
-}
-
 func main() {
 	stations, err := fetchStations()
 	if err != nil {
@@ -226,16 +194,9 @@ func main() {
 	info := tview.NewTextView().SetText("Выберите станцию для прослушивания").SetDynamicColors(true).SetRegions(true).SetWrap(true)
 	info.SetBorder(true).SetTitle("Информация")
 
-	equalizer := tview.NewTextView().SetDynamicColors(true).SetWrap(true)
-	equalizer.SetBorder(true).SetTitle("Эквалайзер")
-
-	currentStation := ""
-	updateEqualizer(equalizer, volume.Volume, currentStation)
-
 	flex := tview.NewFlex().
 		AddItem(list, 0, 1, true).
-		AddItem(info, 0, 2, false).
-		AddItem(equalizer, 0, 2, false)
+		AddItem(info, 0, 2, false)
 
 	var control chan string
 	var wg sync.WaitGroup
@@ -250,9 +211,6 @@ func main() {
 			info.SetText(fmt.Sprintf("[red]Станция недоступна: %s", selectedStation.Name))
 			return
 		}
-
-		currentStation = selectedStation.Name
-		updateEqualizer(equalizer, volume.Volume, currentStation)
 
 		control = make(chan string)
 		wg.Add(1)
@@ -273,9 +231,6 @@ func main() {
 			return
 		}
 
-		currentStation = selectedStation.Name
-		updateEqualizer(equalizer, volume.Volume, currentStation)
-
 		control = make(chan string)
 		wg.Add(1)
 		go func() {
@@ -294,22 +249,8 @@ func main() {
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if control != nil {
 			switch event.Key() {
-			case tcell.KeyCtrlZ:
-				control <- "volume_up"
-				updateEqualizer(equalizer, volume.Volume, currentStation)
-			case tcell.KeyCtrlX:
-				control <- "volume_down"
-				updateEqualizer(equalizer, volume.Volume, currentStation)
-			case tcell.KeyLeft:
-				speaker.Lock()
-				volume.Volume = -2
-				speaker.Unlock()
-				updateEqualizer(equalizer, volume.Volume, currentStation)
-			case tcell.KeyRight:
-				speaker.Lock()
-				volume.Volume = 2
-				speaker.Unlock()
-				updateEqualizer(equalizer, volume.Volume, currentStation)
+			case tcell.KeyCtrlS:
+				control <- "stop"
 			}
 		}
 
